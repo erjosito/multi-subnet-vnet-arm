@@ -1,0 +1,95 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "vnetName": {
+            "defaultValue": "testVnet",
+            "type": "string"
+        },
+        "vnetPrefixes": {
+            "defaultValue": ["10.0.0.0/8", "192.168.0.0/16"],
+            "type": "array"
+        },
+        "subnets": {
+            "defaultValue": [
+                {
+                    "name": "GatewaySubnet",
+                    "prefix": "10.0.0.0/24"
+                },
+                {
+                    "name": "subnet1",
+                    "prefix": "10.0.1.0/24"
+                },
+                {
+                    "name": "subnet2",
+                    "prefix": "10.0.2.0/24"
+                }
+            ],
+            "type": "array"
+        }
+    },
+    "variables": {
+        "apiVersion": "2016-03-30",
+        "subnetCount": "[length(parameters('subnets'))]",
+        "nsgSuffix": "-nsg",
+        "subnetsWithoutNSG": [ "GatewaySubnet" ]
+    },
+    "resources": [
+        {
+            "comments": "Create Vnet with subnets, as defined by the input parameter",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[parameters('vnetName')]",
+            "apiVersion": "[variables('apiVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": "[parameters('vnetPrefixes')]"
+                },
+                "copy": [{
+                    "name": "subnets",
+                    "count": "[variables('subnetCount')]",
+                    "input": {
+                        "name": "[parameters('subnets')[copyIndex('subnets')]['name']]",
+                        "properties": {
+                            "addressPrefix": "[parameters('subnets')[copyIndex('subnets')]['prefix']]",
+                            "networkSecurityGroup": "[if(contains(variables('subnetsWithoutNSG'), parameters('subnets')[copyIndex('subnets')]['name']), json('null'), json(concat('{\"id\": \"', resourceId('Microsoft.Network/networkSecurityGroups', concat(parameters('subnets')[copyIndex('subnets')]['name'], variables('nsgSuffix'))), '\"}')))]"
+                        }
+                    }
+                }]
+            },
+            "resources": [],
+            "dependsOn": ["nsgCopy"]
+        },
+        {
+            "comments": "NSGs not required, but here for extra security",
+            "condition": "[not(contains(variables('subnetsWithoutNSG'), parameters('subnets')[copyIndex()]['name']))]",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[concat(parameters('subnets')[copyIndex()]['name'], variables('nsgSuffix'))]",
+            "apiVersion": "[variables('apiVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "default-allow-ssh",
+                        "properties": {
+                            "protocol": "TCP",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 1000,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            },
+            "resources": [],
+            "dependsOn": [],
+            "copy": {
+                "name": "nsgCopy",
+                "count": "[variables('subnetCount')]"
+            }
+        }
+    ]
+}
